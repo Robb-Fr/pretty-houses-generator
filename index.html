@@ -1,0 +1,423 @@
+<head>
+	<meta charset="utf-8">
+	<link rel="stylesheet" href="style.css">
+	<link href='https://fonts.googleapis.com/css?family=Istok Web' rel='stylesheet'>
+</head>
+
+<body>
+	<!-- PrettyFy scripting -->
+	<script src="https://cdn.jsdelivr.net/gh/google/code-prettify@master/loader/run_prettify.js"></script>
+	<!-- For using LaTeX -->
+	<script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+
+	<h1 style="display:center">ICG Project: Pretty Houses Generator</h1>
+	<p class="group17">A project by Emmanuelle Denove, Louise Rieupouilh and Tom Demont</p>
+
+	<h2>Abstract</h2>
+	<p>In Pretty Houses Generator, we wanted to create an app showing various tiles layout in a 3D world that are
+		matching nicely with each other. The main part was the implementation of a Wave Collapse Function to output a
+		valid layout of the tiles we created. We also wanted the app to be interactive to let the user discover and
+		appreciate a visually appealing layout while having a hand on its creation.</p>
+
+	<h2>Technical approach</h2>
+	<p>We decided to create our project using the REGL pipelines and JavaScript to display it in browser using WebGL.
+		Indeed we wanted our project to benefit all the WebGL advantages (GPU computation, portability ...) while being
+		consistant with the tools we developped along the semester's exercices. From the tiles design to the user
+		interface, we wanted to master all the steps of this processus and create a fully functionnal Pretty Houses
+		Generator. We based our GLSL and JavaScript implementations of the Exercice 5: Solar Shading.</p>
+
+	<h3>Tiles design</h3>
+	<p>For the rendering of the tiles, we used MagicaVoxel [3], which was provided to us by the TAs.
+		It was really fun and easy to use and it allowed us to create tiles in 3D for our project. All the tiles and the
+		floor were made
+		by us and so we had to pay attention when creating a new tile to how it was going to fit the others.
+		We created tiles with roof, no roof, with door when the tile was put on the floor, no door and different
+		positions
+		(middle, left, right, corner).
+		This allowed us to have a lot of different possibilities when using the wave collapse function to build a great
+		variety of buildings.</p>
+	<p style="text-align: center;"><img src="media/pretty_balcony.PNG" width="50%"><br>
+		creation of the balcony
+	</p>
+	<p style="text-align: center;"><img src="media/alone_house.PNG" width="50%"><br>
+		base tile, first tile we created
+	</p>
+	<p style="text-align: center;"><img src="media/left_nr.PNG" width="50%"><br>
+		variation of tile, no roof, getting attached to the left
+	</p>
+
+	<h3>Tiles rendering</h3>
+	<h4>Actors model</h4>
+	<p>For the rendering of our tiles, we created the file <code>tiles.js</code> where we took the basis of the
+		<code>planets.js</code> actors modelization. We could get rid of the physical (orbit, speed, size) aspects as we
+		just wanted to display 3D fixed tile actors. We then created the classes <code>UnshadedTileActor</code>,
+		<code>PhongTileActor</code> and <code>MeshTileActor</code>, each one inheritting the former. The only
+		modification with relation to the previous <code>PlanetActors</code> is in the computation of the
+		<code>mat_model_to_world</code> matrix.
+		Indeed, we added <code>x</code>, <code>y</code> and <code>z</code> attributes to place the tiles in a grid where
+		each tile would occupy one cell. This helped us to boilerplate the tiles placing in the algorithms by just
+		taking this 3D cells representations. The model matrix computation makes sure to rotate the tile facing the user
+		in default position and placing it correctly in the world: our tiles are \(32\times 32 \times 32\)px, observing
+		\(1\) unit length is \(10\)px, we created the correct translation matrix:
+	</p>
+	<pre class="prettyprint lang-js">
+		<code>// Matrix to shift the tile on its coordinate (and put it above the ground). 
+		//Each tile is 32px large, long and high. 1 length unit is 10px observed
+		let placingMatrix = mat4.fromTranslation(
+		mat4.create(),
+		vec3.fromValues(3.2 * this.x, 3.2 * this.z, 3.2 * this.y)
+		);
+		// Rotate the tile to avoid put it on its default rotation
+		let rotateMatrixX = mat4.fromXRotation(mat4.create(), Math.PI / 2);
+		let rotateMatrixY = mat4.fromYRotation(mat4.create(), Math.PI / 2);
+		const rotateMatrix = mat4_matmul_many(mat4.create(), rotateMatrixX, rotateMatrixY);
+	
+		// Store the combined transform in this.mat_model_to_world
+		mat4_matmul_many(this.mat_model_to_world, sizeMat, rotateMatrix, placingMatrix);</code>
+	</pre>
+	<h4>Tiles set to render</h4>
+	<p>Updating then the <code>actors_list</code> variable was just done by iterating over a given <code>tiles</code>
+		list giving tiles by their id (the prefix name of their object, material and texture files). This list also
+		contains the desired coordinates for the tile to ease its placement.</p>
+	<p>To add realism, we decided to adapt the shininess and ambient factor to the type of tile. The <code>grass</code>
+		tiles were less shiny than our other tiles and more ambiently brillant to compensate the shining loss:</p>
+	<pre class="prettyprint lang-js">
+		<code>function create_actor_list() {
+			// ...
+			const shine = tiles[i].id === 'grass' ? 1 : 14;
+			const amb = tiles[i].id === 'grass' ? 0.9 : 0.5;
+			// ..
+		}</code>
+	</pre>
+	<p>The last added point was the rendering of empty tiles. Those are identified by an id <code>air</code>. We used
+		the already implemented <code>pipeline_without_mesh</code> in the <code>MeshTileActor</code> class to
+		render actors without mesh. In the actor creation, an <code>air</code> tile were assigned no mesh nor texture
+		while every other tile has its mesh and texture loaded synchronously (with <code>await</code>) and passed as
+		arguments to the constructor.</p>
+	<p>The remaining parts of the rendering pipeline are similar to the one used in the Exercice 5, using the
+		<code>draw</code> function of each tile to render it in the REGL canvas.
+	</p>
+	<p style="text-align: center;"><img src="media/tiles_rendering.png" width="50%"><br>
+		Example of tiles placed vertically in our world
+	</p>
+
+	<h3>Wave Collapse Function in Java</h3>
+	<h4>Java model</h4>
+	<p>Because it is a language that we are quite familiar with, we decided to implement the wave collapse function in
+		Java. We then found a youtube video [4] explaining the structure of the code of this function, which we adapted
+		to
+		our project.</p>
+
+	<p>The principle of the wave collapse is that for every cell in the world, there is an array of possible tiles for
+		this cell. At the beginning, this array contains all tiles that we created. First, the arrays are restricted to
+		only contain tiles compatible with their z-position (i.e. cells at z = 0 can only contain tiles that can be
+		placed on the floor, and vice-versa for cells at z > 0). Then, a function finds the cell with the lowest
+		entropy, hence with the smallest possible tiles array, and calls the <code>collapse</code> function on it. This
+		function sets the tile of this cell to a random one within the array of possible tiles. This change is then
+		propagated, meaning that this cell’s neighbors adapt their own possible tiles list taking into consideration the
+		newly placed tile, and then notify their own neighbors to adapt their possible tiles array (i.e. the cell above
+		an “air” tile will also be an “air” tile since buildings cannot float, and that change will be propagated to its
+		own neighbors). This process is repeated until all cells have only one tile in their possible tiles array.</p>
+
+	<p>In order for the algorithm to know what other tiles a tile is compatible with, we used the principle of sockets
+		(more details on that below). We then create, at the launching of our function, a list of
+		<code>TileCorrespondences</code>. These store, for every one of our tiles (stored in the <code>TilesDB</code>
+		class), the list of tiles compatible with each side of the tile. This makes it a lot easier to access the tiles
+		that can be put in a certain cell depending on the cell’s neighboring tiles.
+	</p>
+	<h4>Sockets matching</h4>
+	<p>Every side of a tile has an associated socket, and two sides are compatible if and only if they have the same
+		socket AND are corresponding sides (i.e. the left side of a tile can only be compatible with the right side of a
+		tile, not with the top or bottom for example). The sockets were determined manually for every one of our tiles,
+		and we currently have 20 different sockets.</p>
+	<p>We also introduced the concept of a <code>door_side</code> for tiles. This stores, as the name suggests, the side
+		on which there is a door (if any) for a given tile. When creating TileCorrespondences for tiles that have a
+		door, the only compatible tile with the door side is the “air” tile. This is because it seemed illogical to us
+		to be able to place tiles in front of doors, making the door inaccessible.</p>
+	<h4>Client Server Architecture</h4>
+	<p>One of the main issues in our project was dealing with both the WebGL displaying using Web coding and the
+		algorithm computation. Indeed, we tried to implement the WFC algorithm in JavaScript, but seing the toughness og
+		the computation, we prefered to keep our initial working Java version. We then had to initiate a link between
+		both applications, and following the ICG team advices, we implemented a client server architecture.</p>
+	<h5>Java Server</h5>
+	The difficulty of implementing the java server was figuring out which Java library we would use. After some trial
+	and error, we settled on HttpServer [5], which worked the best. We also had some issues linked to security of http
+	requests. At first, we wanted the Java server to call the wave collapse function and then send the computed tile
+	array to the python server in JSON form. However, with the way HTTP requests are implemented in JavaScript, there is
+	a security measure called <code>cors</code> which masks the http request content. This seemed quite complicated to
+	override, so we settled on using the http requests only to notify the python server that the tiles are computed and
+	can be displayed. The Java takes care of writing the corresponding tile array in JSON form to a specific file that
+	the JavaScript then reads.
+	<h5>JavaScript Client</h5>
+	<p>To query a new tiles set, we set on <strong class="keyboard">g</strong> key the call of a
+		<code>query_new_tileset</code> function. To deal with asynchronicity of our requests, we set boolean flags
+		<code>received_new_tiles</code>,<code>querying_new_tiles</code> and <code>error_on_receive</code> to indicate
+		the state of the query to the rendering pipeline. Indeed, we did not wanted to take the risk to display tiles
+		from a list being modified by 2 parts of the program. We then added <code>if</code> conditions in the frame
+		computation to avoid manipulating <code>actors_list</code> when the query is not fully complete.
+	</p>
+	<p>We decided to wrap our query in a GET request, bt the issue we struggled with was the CORS of
+		<code>fetch</code>[1] queries. Indeed, we couldn't get without
+		authentification the GET RESULT of our query to the Java Server. To handle it, we made the the Java Server write
+		its output tiles' layout to <code>tiles.json</code> file. After that, we could load the JSON file and get the
+		tiles to display
+	</p>
+	<p>Finally, we had to adapt our <code>actors_list</code> but also <code>actors_by_name</code>. To do so, we created
+		the <code>create_actor_list()</code> and <code>create_actor_corner_by_name()</code> functions that was called in the rendering
+		pipeline by putting the <code>draw_list = actors_list.slice()</code> line inside the frame computation.</p>
+	<p>With this whole process, we were able to, and with no concurrence major issue, call our Java server for updating
+		our tiles set to place in world and adquatly render it on the <strong class="keyboard">g</strong> key pressing.
+	</p>
+	<p>Finally, the user receives feedback on the tiles computation in the debug overlay to be informed if something
+		failed or is still being computed, displayed using our flags
+		<code>received_new_tiles</code>,<code>querying_new_tiles</code> and <code>error_on_receive</code>.
+	</p>
+	<p style="text-align: center;"><img src="media/tiles_feedback.png" width="60%"><br>
+		The feedback messages during the WFC query processing
+	</p>
+
+	<h4>Constrained computation</h4>
+	<p>Finally, we adapted our code to be able to handle and read GET requests where constrainted are specified by
+		<code>index</code> (a wrapper for the 3D coordinates of a tile) and an <code>id</code>, the file name of the
+		tile we want to set. These constraints were handled easily in computation by setting the desired tile at desired
+		position and propagating the constraints update. The user interface to specify those constraints is described below.
+	</p>
+
+	<h3>Bézier curves camera paths</h3>
+	<p>Seeing our visual result getting closer to what we expected, we decided that the extension of the camera to
+		follow Bézier curve's path was perfectly adapted to add the smoothness we wanted.</p>
+	<p>To do so, we added many parameters with prefix <code>old_</code> and <code>new_</code>. Those helped us to
+		specify the beginning and end values to be interpolated for the <code>cam_distance_factor</code>,
+		<code>cam_angle_z</code> and <code>cam_angle_y</code>. They were not necessary for our pure Bézier curve
+		but we decided it would be smooth to also linearly lerp those values with the same time parameter as the
+		Bézier's. The visual result is that the camera rotates and goes back/forward whenever we change its position and
+		recenters on a nice position/rotation/distance.
+	</p>
+	<video class="vid" loop autoplay muted src="media/camera_rotation.mp4" width="50%"></video>
+	<p style="text-align: center;">Example of rotating and placing camera in linear interpolation</p>
+	<p>The key of the Bézier interpolation is the <code>bezier_param</code> that represents the time parameter \(t\)
+		that evolves from \(0\) to \(1\). Whenever the user asks for a new position to be selected, the
+		<code>bezier_param</code> value is set back to \(0\) and the new <code>cam_distance_factor</code>,
+		<code>cam_angle_z</code> and <code>cam_angle_y</code> are put in the <code>new_</code> variables. When this
+		value gets back to \(1\), we know our update is done and we just apply the same transformation as before in the
+		previous Exercice 5 where camera just centers on a selected Actor.
+	</p>
+	<p>We decided to put three control point in our Bézier paths as we were very satisfied with the result. Having those
+		3 meant that we had to take a starting point, <code>old_selected_corner_position</code>, and ending point
+		<code>new_selected_corner_position</code> and a middle point <code>third_point_position</code>. To have a
+		simetrical curve and create a curvy effect, we placed this point on the perpendicular bisector of the straight
+		line between start and end point. The shape aspect of our curve is displayed below.
+	</p>
+	<p style="text-align: center;"><img src="media/bezier_curve.png" width="30%"><br>
+		The shape of our created Bézier curve (from the course's web slides) [2]
+	</p>
+	<p>Once those points were computed, we could solve the quadratic equation using the de Castlejau algorithm [2]:
+		$$\textbf{x}(t)=(1-t)^2\textbf{b}_0+2(1-t)t\textbf{b}_1+t^2\textbf{b}_2$$ Where <strong>b</strong> points are
+		the controle points. Observing the <code>vec3</code> class, we saw a method computing exactly the desired result
+		<code>vec3.bezier(out, a, b, c, d, t)</code>. Observing that putting our third point in place of <code>b</code>
+		and <code>c</code> intermediary paramaters results in the same as having one middle paramater, we used it to
+		output the desired camera translation at every intermediary points between the old and new camera positions and
+		modify accordingly the <code>mat_view</code> matrix in the frame computation. We finally update our time to
+		simulate a time effect and make our paramter grow to \(1\).
+	</p>
+	<p>The visual result looked very nice to us and we liked to move around our houses following thos curves.</p>
+	<video class="vid" loop autoplay muted src="media/bezier_paths.mp4" width="60%"></video>
+	<p style="text-align: center;">Some examples of Bézier camera paths</p>
+
+	<h3>User Interface</h3>
+	<p>We created to part for our user interface: the part for the user to navigate in our world by selecting tiles and
+		the part to set constraints on WFC computation.</p>
+	<h4>Tile selection</h4>
+	<p>For the user interface, we wanted the user to be able to select the tiles to focus on. However, allow her to
+		select any tile as there were 75 of them were probably not good for the readibility of our interface. We then
+		created the <code>corners_by_name</code> and its sorted version <code>sorted_corners_by_name</code> to be able
+		to display the list of corners in the debug overlay. The "corners" are the tiles actors in corner coordinates
+		(all the maximized/minimized coordinates combinations) plus the tiles in the middle of the layout on middle,
+		bottom and top of \(Z\) axis. Similarly to the Exercice 5's <code>actors_by_name</code> list, pressing the
+		buttons sets the viewed corner as the selected one with an adapted camera rotation and distance. The Bézier
+		lerping could then start on next frames updates.</p>
+	<p style="text-align: center;"><img src="media/tile_selection.png" width="70%"><br>
+		Tile selection interface
+	</p>
+	<h4>Constraints setting</h4>
+	<p>Our final amelioration of the project was setting a tile constraint by the user. We wanted this process to be
+		interactive and intuitive. A new layout appears when the users presses <strong class="keyboard">W</strong>,
+		containing an HTML form composed of input selections that'll be read by our program.</p>
+	<p>We created 2 sets of buttons for selecting the tile position to set (in 2D on the face facing the user when
+		pressing a <code>middle_</code> button) and the type of tile desired. On pressing the
+		<code>Generate new tiles with constraints</code> button, the values are read in the <code>main.js</code>. If the
+		user selected a bad combination of tile and position, an alert will be sent to indicate the user to make another
+		choice and nothing will be queried. Otherwise, we'll call the JavaServer with the specified constraints and the
+		window automatically closes. We also made sure that only one query is made at a time to avoid loading too much
+		computation.</p>
+	<p style="text-align: center;"><img src="media/constraints_menu.png" width="60%"><br>
+		Tile constraints menu
+	</p>
+	<p style="text-align: center;"><img src="media/tile_alert.png" width="30%"><br>
+		The alert on bad tile/position selection
+	</p>
+
+	<h2>Results</h2>
+	<h3>Optimization possibilities</h3>
+	<p>Sadly, the computation of tiles can be quite slow. This is due to the randomization process : sometimes, cells
+		are
+		collapsed in a way that makes it impossible to fill the entire grid correctly, so the algorithm has to re-run
+		quite
+		a few times (this number completely depends on the randomization) in order to find a valid array of tiles that
+		can
+		fill the whole grid. An optimization that we had in mind but did not have time to implement was to write the
+		initial
+		array of possible tiles taking into consideration the tiles that could and couldn't be on the z = 0 plane into a
+		local file that can be read, instead of recomputing this array at every iteration of the algorithm.</p>
+	<h3>How to launch the project</h3>
+	<p>As described above, our project requires Java Server to run to compute new tiles sets. To launch the project,
+		please be at the root of the project folder and run:</p>
+	<pre class="prettyprint lang-sh">
+	<code>python3 -m http.server</code>
+	</pre>
+	while in another terminal running:
+	<pre class="prettyprint lang-sh">
+	<code>cd WaveCollapse_classes; java JavaServer</code>
+	</pre>
+	<h3>Project demo</h3>
+	<iframe src="project.html" style="height:700px;width:1000px; margin:auto; display:block;">
+		<script src="./src/main.js" defer="true"></script>
+
+		<!-- regl will add its own full-screen canvas -->
+
+		<div id="debug-overlay">
+			<p>
+				ICG Project: Pretty Houses Generator
+				⁙⁙ docs:
+				<a href="https://github.com/regl-project/regl/blob/gh-pages/API.md">regl</a>,
+				<a href="http://glmatrix.net/docs/">gl-matrix</a>,
+				<a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript">MDN</a>
+				⁙⁙ drag with mouse rotate
+				⁙⁙ scroll to zoom
+				⁙⁙ pause <strong class="keyboard">p</strong>
+				⁙⁙ hide <strong class="keyboard">h</strong>
+				⁙⁙ set constraints <strong class="keyboard">w</strong>
+				⁙⁙ generate new houses (no constraints) <strong class="keyboard">g</strong>
+			</p>
+			<ul id="view-select">Focus:</ul>
+			<pre id="debug-text"></pre>
+		</div>
+
+		<div id="wfc-overlay" class="hidden">
+			<p id="text-wfc">
+				Select one position on the first face to set a tile on (choose <strong>one</strong> position and
+				<strong>one</strong> tile) ⁙⁙ hide set constraints <strong class="keyboard">w</strong>
+			</p>
+
+			<h4 style="text-align:center">Position</h4>
+			<p>Coordinates (x,y,z) to set (on the face you see when pressing <strong class="keyboard">middle</strong>):
+			</p>
+			<form id="pos-tiles">
+				<input type="radio" id="pos002" name="position">
+				<label for="pos002"> (0,0,2)</label>
+				<input type="radio" id="pos012" name="position">
+				<label for="pos012"> (0,1,2)</label>
+				<input type="radio" id="pos022" name="position">
+				<label for="pos022"> (0,2,2)</label>
+				<input type="radio" id="pos032" name="position">
+				<label for="pos032"> (0,3,2)</label>
+				<input type="radio" id="pos042" name="position">
+				<label for="pos042"> (0,4,2)</label></br>
+				<input type="radio" id="pos001" name="position">
+				<label for="pos001"> (0,0,1)</label>
+				<input type="radio" id="pos011" name="position">
+				<label for="pos011"> (0,1,1)</label>
+				<input type="radio" id="pos021" name="position">
+				<label for="pos021"> (0,2,1)</label>
+				<input type="radio" id="pos031" name="position">
+				<label for="pos031"> (0,3,1)</label>
+				<input type="radio" id="pos041" name="position">
+				<label for="pos041"> (0,4,1)</label></br>
+				<input type="radio" id="pos000" name="position">
+				<label for="pos000"> (0,0,0)</label>
+				<input type="radio" id="pos010" name="position">
+				<label for="pos010"> (0,1,0)</label>
+				<input type="radio" id="pos020" name="position">
+				<label for="pos020"> (0,2,0)</label>
+				<input type="radio" id="pos030" name="position">
+				<label for="pos030"> (0,3,0)</label>
+				<input type="radio" id="pos040" name="position">
+				<label for="pos040"> (0,4,0)</label></br>
+			</form>
+
+			<h4 style="text-align:center">Tile</h4>
+			<p>The tile you want to put in:</p>
+			<form id="img-tiles">
+				<input type="radio" id="tile_1_right" name="tile"><label for="tile_1_right"><img
+						src="./img_2D/tile_1_right.png" /></label>
+				<input type="radio" id="tile_1_alone" name="tile"><label for="tile_1_alone"><img
+						src="./img_2D/tile_1_alone.png" /></label>
+				<input type="radio" id="tile_1_left" name="tile"><label for="tile_1_left"><img
+						src="./img_2D/tile_1_left.png" /></label>
+				<input type="radio" id="tile_1_right_nr" name="tile"><label for="tile_1_right_nr"><img
+						src="./img_2D/tile_1_right_nr.png" /></label>
+				<input type="radio" id="tile_1_middle_nr" name="tile"><label for="tile_1_middle_nr"><img
+						src="./img_2D/tile_1_middle_nr.png" /></label>
+				<input type="radio" id="tile_1_left_nr" name="tile"><label for="tile_1_left_nr"><img
+						src="./img_2D/tile_1_left_nr.png" /></label>
+				<input type="radio" id="tile_1_alone_nr" name="tile"><label for="tile_1_alone_nr"><img
+						src="./img_2D/tile_1_alone_nr.png" /></label><br>
+				<input type="radio" id="tile_1_middle" name="tile"><label for="tile_1_middle"><img
+						src="./img_2D/tile_1_middle.png" /></label>
+				<input type="radio" id="tile_2_alone_nr" name="tile"><label for="tile_2_alone_nr"><img
+						src="./img_2D/tile_2_alone_nr.png" /></label>
+				<input type="radio" id="tile_2_right_nr" name="tile"><label for="tile_2_right_nr"><img
+						src="./img_2D/tile_2_right_nr.png" /></label>
+				<input type="radio" id="tile_2_middle_nr" name="tile"><label for="tile_2_middle_nr"><img
+						src="./img_2D/tile_2_middle_nr.png" /></label>
+				<input type="radio" id="tile_2_left_nr" name="tile"><label for="tile_2_left_nr"><img
+						src="./img_2D/tile_2_left_nr.png" /></label>
+				<input type="radio" id="tile_3_left" name="tile"><label for="tile_3_left"><img
+						src="./img_2D/tile_3_left.png" /></label>
+				<input type="radio" id="tile_3_middle" name="tile"><label for="tile_3_middle"><img
+						src="./img_2D/tile_3_middle.png" /></label><br>
+				<input type="radio" id="tile_3_right" name="tile"><label for="tile_3_right"><img
+						src="./img_2D/tile_3_right.png" /></label>
+				<input type="radio" id="tile_3_left_nr" name="tile"><label for="tile_3_left_nr"><img
+						src="./img_2D/tile_3_left_nr.png" /></label>
+				<input type="radio" id="tile_3_middle_nr" name="tile"><label for="tile_3_middle_nr"><img
+						src="./img_2D/tile_3_middle_nr.png" /></label>
+				<input type="radio" id="tile_3_right_nr" name="tile"><label for="tile_3_right_nr"><img
+						src="./img_2D/tile_3_right_nr.png" /></label>
+				<input type="radio" id="tile_1_left_nb" name="tile"><label for="tile_1_left_nb"><img
+						src="./img_2D/tile_1_left_nb.png" /></label>
+				<input type="radio" id="tile_1_middle_nb" name="tile"><label for="tile_1_middle_nb"><img
+						src="./img_2D/tile_1_middle_nb.png" /></label>
+				<input type="radio" id="tile_1_right_nb" name="tile"><label for="tile_1_right_nb"><img
+						src="./img_2D/tile_1_right_nb.png" /></label><br>
+			</form>
+
+			<div style="text-align:center">
+				<button type="button" class="button" id="generate">New tiles set with constraints</button>
+			</div>
+	</iframe>
+
+
+	<h2>Team members' contribution</h2>
+	<p>Each team member contributed equally and we were very happy to work together and face this huge project was made
+		easier by the smoothness of interacting with each other. Here are the specialized part of each one of us:
+	<ul>
+		<li><strong>Louise</strong>: tiles design and user interface</li>
+		<li><strong>Tom</strong>: tiles rendering, JavaScript client and Bézier curves</li>
+		<li><strong>Emmanuelle</strong>: all the Java Wave Function Collapse algorithm, server architecture</li>
+	</ul>
+	</p>
+
+	<h2>References</h2>
+	[1] <a href="https://developer.mozilla.org/en-US/docs/Web/API/Fetch_API/Using_Fetch">fetch method
+		documentation</a><br />
+	[2] <a
+		href="https://lgg.epfl.ch/teaching/ICG20/icg_lectures/Online11-Bezier-Curves.html#/de-casteljau-leftrightarrow-bernstein-basis">Bézier
+		interpolation formula</a> <br />
+	[3] <a href="https://ephtracy.github.io/">MagicaVoxel</a><br />
+	[4] <a href="https://www.youtube.com/watch?v=2SuvO4Gi7uY">WFC computation tutorial</a><br />
+	[5] <a
+		href="https://docs.oracle.com/javase/8/docs/jre/api/net/httpserver/spec/com/sun/net/httpserver/HttpServer.html">HTTP
+		Server Library</a><br />
+
+</body>
